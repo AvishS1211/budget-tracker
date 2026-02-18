@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // Allow CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -9,6 +8,11 @@ export default async function handler(req, res) {
 
   const { prompt } = req.body;
   const GEMINI_API_KEY = process.env.GEMINI_API_Key;
+
+  // Debug: check if key is loaded
+  if (!GEMINI_API_KEY) {
+    return res.status(500).json({ error: "GEMINI_API_Key environment variable is missing" });
+  }
 
   try {
     const response = await fetch(
@@ -22,11 +26,27 @@ export default async function handler(req, res) {
         })
       }
     );
+
     const data = await response.json();
-    const answer = data?.candidates?.[0]?.content?.parts?.[0]?.text || "No response from Gemini.";
+
+    // Debug: log full Gemini response
+    console.log("Gemini response:", JSON.stringify(data));
+
+    // Check for Gemini API errors
+    if (data.error) {
+      return res.status(500).json({ error: `Gemini error: ${data.error.message}` });
+    }
+
+    const answer = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!answer) {
+      return res.status(500).json({ error: "Gemini returned empty response", raw: data });
+    }
+
     res.status(200).json({ answer });
+
   } catch (err) {
-    console.error("Gemini error:", err);
-    res.status(500).json({ error: "Gemini API failed" });
+    console.error("Fetch error:", err);
+    res.status(500).json({ error: err.message });
   }
 }
