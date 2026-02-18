@@ -1,11 +1,15 @@
 import { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 
-// Supabase client
+// ─── Supabase Client ───
 const supabase = createClient(
   "https://wpwqgkopcfmnzsojtzum.supabase.co",
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indwd3Fna29wY2Ztbnpzb2p0enVtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE0MjQ1ODYsImV4cCI6MjA4NzAwMDU4Nn0.7ByIPFmTF8FW2dK75iekhBVnoSt4C0HIODoTfyCfgVM"
 );
+
+// ─── Gemini API ───
+const GEMINI_API_KEY = "AIzaSyCj90urYtVafRhNMMNOU2AoOtx2aFaaIYo";
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 const CATEGORIES = [
   { name: "Food & Dining", icon: "🍽️", color: "#E8A87C" },
@@ -60,36 +64,20 @@ export default function BudgetTracker() {
   const [budgetInput, setBudgetInput] = useState(budget);
   const [loading, setLoading] = useState(true);
 
-  // ─── Load everything from Supabase on startup ───
   useEffect(() => {
     async function loadAll() {
       setLoading(true);
       try {
-        // Load expenses
-        const { data: expData, error: expError } = await supabase
-          .from("expenses")
-          .select("*")
-          .order("date", { ascending: false });
+        const { data: expData, error: expError } = await supabase.from("expenses").select("*").order("date", { ascending: false });
         if (!expError && expData) setExpenses(expData);
 
-        // Load budget setting
-        const { data: settData, error: settError } = await supabase
-          .from("settings")
-          .select("*")
-          .eq("key", "budget")
-          .single();
+        const { data: settData, error: settError } = await supabase.from("settings").select("*").eq("key", "budget").single();
         if (!settError && settData) setBudget(Number(settData.value));
 
-        // Load AI history
-        const { data: aiData, error: aiError } = await supabase
-          .from("ai_history")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(10);
+        const { data: aiData, error: aiError } = await supabase.from("ai_history").select("*").order("created_at", { ascending: false }).limit(10);
         if (!aiError && aiData) setAiHistory(aiData);
-
       } catch (err) {
-        console.error("Error loading data:", err);
+        console.error("Error loading:", err);
       }
       setLoading(false);
     }
@@ -125,18 +113,11 @@ export default function BudgetTracker() {
 
   const maxMonth = Math.max(...monthlyData.map(m => m.total), 1);
 
-  // ─── Add Expense → Supabase ───
   const addExpense = async () => {
     if (!form.amount || isNaN(Number(form.amount)) || Number(form.amount) <= 0) {
       showToast("Please enter a valid amount", "error"); return;
     }
-    const entry = {
-      id: Date.now(),
-      amount: Number(form.amount),
-      category: form.category,
-      note: form.note,
-      date: form.date
-    };
+    const entry = { id: Date.now(), amount: Number(form.amount), category: form.category, note: form.note, date: form.date };
     try {
       const { error } = await supabase.from("expenses").insert(entry);
       if (error) throw error;
@@ -146,24 +127,20 @@ export default function BudgetTracker() {
       setView("dashboard");
     } catch (err) {
       showToast("Failed to save expense", "error");
-      console.error(err);
     }
   };
 
-  // ─── Delete Expense → Supabase ───
   const deleteExpense = async (id) => {
     try {
       const { error } = await supabase.from("expenses").delete().eq("id", id);
       if (error) throw error;
       setExpenses(prev => prev.filter(e => e.id !== id));
       showToast("Deleted", "info");
-    } catch (err) {
+    } catch {
       showToast("Failed to delete", "error");
-      console.error(err);
     }
   };
 
-  // ─── Save Budget → Supabase ───
   const saveBudget = async (value) => {
     try {
       const { error } = await supabase.from("settings").upsert({ key: "budget", value: String(value), updated_at: new Date().toISOString() });
@@ -171,38 +148,34 @@ export default function BudgetTracker() {
       setBudget(value);
       setEditBudget(false);
       showToast("Budget updated! ✓");
-    } catch (err) {
+    } catch {
       showToast("Failed to save budget", "error");
-      console.error(err);
     }
   };
 
-  // ─── Ask AI → Save to Supabase ───
+  // ─── Ask Gemini ───
   const askAI = async () => {
     if (!aiQuestion.trim()) return;
     setAiLoading(true);
     setAiMessage("");
-    const summary = `Budget: ₹${budget}. Spent: ₹${totalSpent}. Remaining: ₹${remaining}.\nExpenses by category: ${byCategory.map(c => `${c.name}: ₹${c.total}`).join(", ")}.\nMonthly trend: ${monthlyData.map(m => `${m.label}: ₹${m.total}`).join(", ")}.\nTotal transactions: ${expenses.length}.`;
+
+    const summary = `Budget: ₹${budget}. Spent: ₹${totalSpent}. Remaining: ₹${remaining}. Expenses by category: ${byCategory.map(c => `${c.name}: ₹${c.total}`).join(", ")}. Monthly trend: ${monthlyData.map(m => `${m.label}: ₹${m.total}`).join(", ")}. Total transactions: ${expenses.length}.`;
+    const prompt = `You are a friendly personal finance advisor. Give concise, actionable, warm advice. Use ₹ for currency. Keep responses under 200 words. Use bullet points when listing tips.\n\nUser financial data: ${summary}\n\nQuestion: ${aiQuestion}`;
+
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch(GEMINI_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system: `You are a friendly personal finance advisor. The user has shared their expense data. Give concise, actionable, warm advice. Use ₹ for currency. Keep responses under 200 words. Use bullet points when listing tips. Data: ${summary}`,
-          messages: [{ role: "user", content: aiQuestion }]
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 500, temperature: 0.7 }
         })
       });
       const data = await res.json();
-      const answer = data.content?.[0]?.text || "Sorry, I couldn't get a response.";
+      const answer = data?.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, couldn't get a response.";
       setAiMessage(answer);
 
-      // Save AI conversation to Supabase
-      const { error } = await supabase.from("ai_history").insert({
-        question: aiQuestion,
-        answer: answer
-      });
+      const { error } = await supabase.from("ai_history").insert({ question: aiQuestion, answer });
       if (!error) {
         setAiHistory(prev => [{ question: aiQuestion, answer, created_at: new Date().toISOString() }, ...prev].slice(0, 10));
       }
@@ -212,16 +185,9 @@ export default function BudgetTracker() {
     setAiLoading(false);
   };
 
-  const QUICK_QUESTIONS = [
-    "Am I overspending?",
-    "Where can I cut costs?",
-    "How's my savings trend?",
-    "Give me a budget plan"
-  ];
-
+  const QUICK_QUESTIONS = ["Am I overspending?", "Where can I cut costs?", "How's my savings trend?", "Give me a budget plan"];
   const dangerZone = pct >= 90;
 
-  // ─── Loading Screen ───
   if (loading) {
     return (
       <div style={{ minHeight: "100vh", background: "#0D0D1A", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif" }}>
@@ -235,12 +201,9 @@ export default function BudgetTracker() {
   return (
     <div style={{ minHeight: "100vh", background: "#0D0D1A", fontFamily: "'DM Sans', sans-serif", color: "#E8E8F0", position: "relative", overflow: "hidden" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet" />
-
-      {/* Background orbs */}
       <div style={{ position: "fixed", top: -100, right: -100, width: 400, height: 400, borderRadius: "50%", background: "radial-gradient(circle, #2D1B6930 0%, transparent 70%)", pointerEvents: "none" }} />
       <div style={{ position: "fixed", bottom: -150, left: -100, width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(circle, #1B3A6940 0%, transparent 70%)", pointerEvents: "none" }} />
 
-      {/* Toast */}
       {toast && (
         <div style={{ position: "fixed", top: 24, right: 24, zIndex: 999, background: toast.type === "error" ? "#FF6B6B22" : toast.type === "info" ? "#85C1E922" : "#82E0AA22", border: `1px solid ${toast.type === "error" ? "#FF6B6B" : toast.type === "info" ? "#85C1E9" : "#82E0AA"}44`, borderRadius: 12, padding: "12px 20px", color: toast.type === "error" ? "#FF6B6B" : toast.type === "info" ? "#85C1E9" : "#82E0AA", fontSize: 14, fontWeight: 500, backdropFilter: "blur(12px)", animation: "slideIn 0.3s ease" }}>
           {toast.msg}
@@ -252,7 +215,6 @@ export default function BudgetTracker() {
         @keyframes fadeUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         * { box-sizing: border-box; }
         ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #333; border-radius: 99px; }
         input, select, textarea { outline: none; }
         button { cursor: pointer; border: none; }
@@ -272,9 +234,7 @@ export default function BudgetTracker() {
               <button onClick={() => setEditBudget(false)} style={{ background: "#FF6B6B22", border: "1px solid #FF6B6B44", color: "#FF6B6B", borderRadius: 8, padding: "6px 12px", fontSize: 12 }}>✕</button>
             </div>
           ) : (
-            <button onClick={() => { setEditBudget(true); setBudgetInput(budget); }} style={{ background: "#ffffff0a", border: "1px solid #ffffff15", borderRadius: 10, padding: "8px 14px", color: "#aaa", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
-              ✏️ Budget
-            </button>
+            <button onClick={() => { setEditBudget(true); setBudgetInput(budget); }} style={{ background: "#ffffff0a", border: "1px solid #ffffff15", borderRadius: 10, padding: "8px 14px", color: "#aaa", fontSize: 12 }}>✏️ Budget</button>
           )}
         </div>
       </div>
@@ -287,9 +247,7 @@ export default function BudgetTracker() {
             <div style={{ fontSize: 12, color: "#666", letterSpacing: 1 }}>TOTAL SPENT</div>
             <div style={{ fontSize: 12, color: dangerZone ? "#FF6B6B" : "#666" }}>{pct.toFixed(0)}% of budget</div>
           </div>
-          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 38, fontWeight: 700, color: dangerZone ? "#FF6B6B" : "#fff", marginBottom: 4, letterSpacing: -1 }}>
-            {formatCurrency(totalSpent)}
-          </div>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 38, fontWeight: 700, color: dangerZone ? "#FF6B6B" : "#fff", marginBottom: 4, letterSpacing: -1 }}>{formatCurrency(totalSpent)}</div>
           <div style={{ fontSize: 13, color: "#555", marginBottom: 20 }}>Budget: {formatCurrency(budget)} · Remaining: <span style={{ color: remaining < 0 ? "#FF6B6B" : "#82E0AA", fontWeight: 500 }}>{formatCurrency(remaining)}</span></div>
           <ProgressBar value={totalSpent} max={budget} color={dangerZone ? "#FF6B6B" : "#7B68EE"} />
           {dangerZone && <div style={{ marginTop: 14, fontSize: 12, color: "#FF6B6B", background: "#FF6B6B11", borderRadius: 8, padding: "8px 12px" }}>⚠️ You've used {pct.toFixed(0)}% of your budget. Consider cutting back!</div>}
@@ -314,15 +272,9 @@ export default function BudgetTracker() {
       {/* Nav */}
       <div style={{ maxWidth: 480, margin: "20px auto 0", padding: "0 24px" }}>
         <div style={{ background: "#13131f", borderRadius: 16, padding: 4, display: "flex", border: "1px solid #ffffff08" }}>
-          {[
-            { id: "dashboard", label: "Overview", icon: "📊" },
-            { id: "add", label: "Add", icon: "➕" },
-            { id: "history", label: "History", icon: "📋" },
-            { id: "ai", label: "AI", icon: "✨" }
-          ].map(tab => (
-            <button key={tab.id} onClick={() => setView(tab.id)} style={{ flex: 1, padding: "10px 4px", borderRadius: 12, background: view === tab.id ? "#7B68EE22" : "transparent", color: view === tab.id ? "#B8A9FF" : "#555", fontSize: 11, fontWeight: view === tab.id ? 600 : 400, transition: "all 0.2s", display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-              <span style={{ fontSize: 16 }}>{tab.icon}</span>
-              {tab.label}
+          {[{ id: "dashboard", label: "Overview", icon: "📊" }, { id: "add", label: "Add", icon: "➕" }, { id: "history", label: "History", icon: "📋" }, { id: "ai", label: "AI", icon: "🤖" }].map(tab => (
+            <button key={tab.id} onClick={() => setView(tab.id)} style={{ flex: 1, padding: "10px 4px", borderRadius: 12, background: view === tab.id ? "#4285F422" : "transparent", color: view === tab.id ? "#88B4F8" : "#555", fontSize: 11, fontWeight: view === tab.id ? 600 : 400, transition: "all 0.2s", display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+              <span style={{ fontSize: 16 }}>{tab.icon}</span>{tab.label}
             </button>
           ))}
         </div>
@@ -337,12 +289,10 @@ export default function BudgetTracker() {
             {byCategory.length > 0 ? (
               <div style={{ background: "#13131f", borderRadius: 20, padding: 20, border: "1px solid #ffffff08", marginBottom: 16 }}>
                 <div style={{ fontSize: 12, color: "#555", letterSpacing: 2, textTransform: "uppercase", marginBottom: 16 }}>Category Breakdown</div>
-                {byCategory.map((cat, i) => (
+                {byCategory.map(cat => (
                   <div key={cat.name} style={{ marginBottom: 14 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <div style={{ fontSize: 13, color: "#ccc", display: "flex", alignItems: "center", gap: 8 }}>
-                        <span>{cat.icon}</span> {cat.name}
-                      </div>
+                      <div style={{ fontSize: 13, color: "#ccc", display: "flex", alignItems: "center", gap: 8 }}><span>{cat.icon}</span>{cat.name}</div>
                       <div style={{ fontSize: 13, fontWeight: 600, color: cat.color }}>{formatCurrency(cat.total)}</div>
                     </div>
                     <ProgressBar value={cat.total} max={totalSpent} color={cat.color} />
@@ -352,11 +302,9 @@ export default function BudgetTracker() {
             ) : (
               <div style={{ background: "#13131f", borderRadius: 20, padding: 32, border: "1px solid #ffffff08", textAlign: "center", marginBottom: 16 }}>
                 <div style={{ fontSize: 40, marginBottom: 12 }}>💸</div>
-                <div style={{ color: "#555", fontSize: 14 }}>No expenses yet.<br />Tap <strong style={{ color: "#B8A9FF" }}>Add</strong> to get started!</div>
+                <div style={{ color: "#555", fontSize: 14 }}>No expenses yet. Tap <strong style={{ color: "#88B4F8" }}>Add</strong> to get started!</div>
               </div>
             )}
-
-            {/* Monthly Trend */}
             <div style={{ background: "#13131f", borderRadius: 20, padding: 20, border: "1px solid #ffffff08" }}>
               <div style={{ fontSize: 12, color: "#555", letterSpacing: 2, textTransform: "uppercase", marginBottom: 16 }}>6-Month Trend</div>
               <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 80 }}>
@@ -365,8 +313,8 @@ export default function BudgetTracker() {
                   const isCurrent = i === 5;
                   return (
                     <div key={m.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                      <div style={{ width: "100%", height: `${h}px`, minHeight: 4, background: isCurrent ? "#7B68EE" : "#7B68EE44", borderRadius: "6px 6px 0 0", boxShadow: isCurrent ? "0 0 12px #7B68EE66" : "none", transition: "height 0.6s ease" }} />
-                      <div style={{ fontSize: 9, color: isCurrent ? "#B8A9FF" : "#444", fontWeight: isCurrent ? 600 : 400 }}>{m.label}</div>
+                      <div style={{ width: "100%", height: `${h}px`, minHeight: 4, background: isCurrent ? "#4285F4" : "#4285F444", borderRadius: "6px 6px 0 0", boxShadow: isCurrent ? "0 0 12px #4285F466" : "none", transition: "height 0.6s ease" }} />
+                      <div style={{ fontSize: 9, color: isCurrent ? "#88B4F8" : "#444", fontWeight: isCurrent ? 600 : 400 }}>{m.label}</div>
                     </div>
                   );
                 })}
@@ -388,7 +336,7 @@ export default function BudgetTracker() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 {CATEGORIES.map(cat => (
                   <button key={cat.name} onClick={() => setForm(f => ({ ...f, category: cat.name }))} style={{ padding: "10px 12px", borderRadius: 12, background: form.category === cat.name ? `${cat.color}22` : "#0d0d1a", border: `1px solid ${form.category === cat.name ? cat.color + "66" : "#2a2a40"}`, color: form.category === cat.name ? cat.color : "#666", fontSize: 12, display: "flex", alignItems: "center", gap: 8, transition: "all 0.2s" }}>
-                    <span>{cat.icon}</span> {cat.name}
+                    <span>{cat.icon}</span>{cat.name}
                   </button>
                 ))}
               </div>
@@ -401,9 +349,9 @@ export default function BudgetTracker() {
               <div style={{ fontSize: 11, color: "#555", marginBottom: 8, letterSpacing: 1 }}>DATE</div>
               <input value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} type="date" style={{ width: "100%", background: "#0d0d1a", border: "1px solid #2a2a40", borderRadius: 12, padding: "12px 16px", color: "#fff", fontSize: 14 }} />
             </div>
-            <button onClick={addExpense} style={{ width: "100%", padding: "16px", borderRadius: 16, background: "linear-gradient(135deg, #7B68EE, #5A4FCF)", color: "#fff", fontSize: 15, fontWeight: 600, letterSpacing: 0.5, boxShadow: "0 8px 24px #7B68EE44", transition: "transform 0.2s, box-shadow 0.2s" }}
-              onMouseEnter={e => { e.target.style.transform = "translateY(-2px)"; e.target.style.boxShadow = "0 12px 32px #7B68EE55"; }}
-              onMouseLeave={e => { e.target.style.transform = ""; e.target.style.boxShadow = "0 8px 24px #7B68EE44"; }}>
+            <button onClick={addExpense} style={{ width: "100%", padding: "16px", borderRadius: 16, background: "linear-gradient(135deg, #4285F4, #1a73e8)", color: "#fff", fontSize: 15, fontWeight: 600, boxShadow: "0 8px 24px #4285F444", transition: "transform 0.2s" }}
+              onMouseEnter={e => e.target.style.transform = "translateY(-2px)"}
+              onMouseLeave={e => e.target.style.transform = ""}>
               Add Expense
             </button>
           </div>
@@ -441,53 +389,49 @@ export default function BudgetTracker() {
           </div>
         )}
 
-        {/* AI Advisor */}
+        {/* AI — Gemini */}
         {view === "ai" && (
           <div style={{ animation: "fadeUp 0.4s ease" }}>
-            <div style={{ background: "linear-gradient(135deg, #141428, #1e1a3a)", borderRadius: 20, padding: 20, border: "1px solid #7B68EE22", marginBottom: 16 }}>
+            <div style={{ background: "linear-gradient(135deg, #141428, #1a1e28)", borderRadius: 20, padding: 20, border: "1px solid #4285F422", marginBottom: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                <span style={{ fontSize: 20 }}>✨</span>
-                <div style={{ fontSize: 12, color: "#B8A9FF", letterSpacing: 2, textTransform: "uppercase" }}>AI Finance Advisor</div>
+                <span style={{ fontSize: 20 }}>🤖</span>
+                <div style={{ fontSize: 12, color: "#88B4F8", letterSpacing: 2, textTransform: "uppercase" }}>AI Finance Advisor</div>
               </div>
-              <div style={{ fontSize: 13, color: "#666" }}>Powered by Claude · Ask anything about your spending</div>
+              <div style={{ fontSize: 13, color: "#666" }}>Powered by Gemini 2.0 Flash · Ask anything about your spending</div>
             </div>
 
-            {/* Quick Questions */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
               {QUICK_QUESTIONS.map(q => (
-                <button key={q} onClick={() => setAiQuestion(q)} style={{ background: "#13131f", border: `1px solid ${aiQuestion === q ? "#7B68EE44" : "#ffffff08"}`, borderRadius: 12, padding: "12px 14px", color: aiQuestion === q ? "#B8A9FF" : "#666", fontSize: 12, textAlign: "left", transition: "all 0.2s" }}>
-                  {q}
-                </button>
+                <button key={q} onClick={() => setAiQuestion(q)} style={{ background: "#13131f", border: `1px solid ${aiQuestion === q ? "#4285F444" : "#ffffff08"}`, borderRadius: 12, padding: "12px 14px", color: aiQuestion === q ? "#88B4F8" : "#666", fontSize: 12, textAlign: "left", transition: "all 0.2s" }}>{q}</button>
               ))}
             </div>
 
             <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
               <input value={aiQuestion} onChange={e => setAiQuestion(e.target.value)} onKeyDown={e => e.key === "Enter" && askAI()} placeholder="Ask about your finances..." style={{ flex: 1, background: "#13131f", border: "1px solid #2a2a40", borderRadius: 12, padding: "12px 16px", color: "#fff", fontSize: 13 }} />
-              <button onClick={askAI} disabled={aiLoading} style={{ background: aiLoading ? "#333" : "linear-gradient(135deg, #7B68EE, #5A4FCF)", border: "none", borderRadius: 12, padding: "12px 18px", color: "#fff", fontSize: 18, boxShadow: aiLoading ? "none" : "0 4px 16px #7B68EE44", transition: "all 0.2s" }}>
+              <button onClick={askAI} disabled={aiLoading} style={{ background: aiLoading ? "#333" : "linear-gradient(135deg, #4285F4, #1a73e8)", border: "none", borderRadius: 12, padding: "12px 18px", color: "#fff", fontSize: 18, boxShadow: aiLoading ? "none" : "0 4px 16px #4285F444", transition: "all 0.2s" }}>
                 {aiLoading ? "⏳" : "→"}
               </button>
             </div>
 
             {aiLoading && (
-              <div style={{ background: "#13131f", borderRadius: 16, padding: 20, border: "1px solid #7B68EE22", textAlign: "center" }}>
-                <div style={{ color: "#7B68EE", fontSize: 13 }}>Analyzing your finances...</div>
+              <div style={{ background: "#13131f", borderRadius: 16, padding: 20, border: "1px solid #4285F422", textAlign: "center" }}>
+                <div style={{ color: "#4285F4", fontSize: 13 }}>Gemini is analyzing your finances...</div>
               </div>
             )}
 
             {aiMessage && !aiLoading && (
-              <div style={{ background: "#13131f", borderRadius: 16, padding: 20, border: "1px solid #7B68EE22", animation: "fadeUp 0.4s ease", marginBottom: 16 }}>
-                <div style={{ fontSize: 11, color: "#7B68EE", letterSpacing: 2, marginBottom: 12 }}>✨ AI INSIGHT</div>
+              <div style={{ background: "#13131f", borderRadius: 16, padding: 20, border: "1px solid #4285F422", animation: "fadeUp 0.4s ease", marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: "#4285F4", letterSpacing: 2, marginBottom: 12 }}>🤖 GEMINI INSIGHT</div>
                 <div style={{ fontSize: 13, color: "#ccc", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{aiMessage}</div>
               </div>
             )}
 
-            {/* AI History from Supabase */}
             {aiHistory.length > 0 && (
               <div style={{ background: "#13131f", borderRadius: 16, padding: 20, border: "1px solid #ffffff08" }}>
                 <div style={{ fontSize: 11, color: "#555", letterSpacing: 2, marginBottom: 14 }}>PAST CONVERSATIONS</div>
                 {aiHistory.slice(0, 5).map((h, i) => (
                   <div key={i} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: i < 4 ? "1px solid #ffffff08" : "none" }}>
-                    <div style={{ fontSize: 12, color: "#7B68EE", marginBottom: 4 }}>Q: {h.question}</div>
+                    <div style={{ fontSize: 12, color: "#4285F4", marginBottom: 4 }}>Q: {h.question}</div>
                     <div style={{ fontSize: 12, color: "#555", lineHeight: 1.5 }}>{h.answer.slice(0, 120)}...</div>
                   </div>
                 ))}
@@ -497,7 +441,7 @@ export default function BudgetTracker() {
             {!aiMessage && !aiLoading && expenses.length === 0 && (
               <div style={{ background: "#13131f", borderRadius: 16, padding: 20, border: "1px solid #ffffff08", textAlign: "center" }}>
                 <div style={{ fontSize: 32, marginBottom: 10 }}>📊</div>
-                <div style={{ color: "#555", fontSize: 13 }}>Add some expenses first, then ask me anything about your spending habits!</div>
+                <div style={{ color: "#555", fontSize: 13 }}>Add some expenses first, then ask Gemini anything!</div>
               </div>
             )}
           </div>
