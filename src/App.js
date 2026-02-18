@@ -7,9 +7,7 @@ const supabase = createClient(
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indwd3Fna29wY2Ztbnpzb2p0enVtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE0MjQ1ODYsImV4cCI6MjA4NzAwMDU4Nn0.7ByIPFmTF8FW2dK75iekhBVnoSt4C0HIODoTfyCfgVM"
 );
 
-// ─── Gemini API ───
-const GEMINI_API_KEY = "AIzaSyCj90urYtVafRhNMMNOU2AoOtx2aFaaIYo";
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+// ─── Gemini API is called via /api/gemini serverless route ───
 
 const CATEGORIES = [
   { name: "Food & Dining", icon: "🍽️", color: "#E8A87C" },
@@ -163,16 +161,13 @@ export default function BudgetTracker() {
     const prompt = `You are a friendly personal finance advisor. Give concise, actionable, warm advice. Use ₹ for currency. Keep responses under 200 words. Use bullet points when listing tips.\n\nUser financial data: ${summary}\n\nQuestion: ${aiQuestion}`;
 
     try {
-      const res = await fetch(GEMINI_URL, {
+      const res = await fetch("/api/gemini", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 500, temperature: 0.7 }
-        })
+        body: JSON.stringify({ prompt })
       });
       const data = await res.json();
-      const answer = data?.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, couldn't get a response.";
+      const answer = data?.answer || "Sorry, couldn't get a response.";
       setAiMessage(answer);
 
       const { error } = await supabase.from("ai_history").insert({ question: aiQuestion, answer });
