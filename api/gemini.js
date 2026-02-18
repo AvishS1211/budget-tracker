@@ -7,7 +7,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
   const { prompt } = req.body;
-  const GEMINI_API_KEY = process.env.GEMINI_API_Key;
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
   // Debug: check if key is loaded
   if (!GEMINI_API_KEY) {
