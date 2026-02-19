@@ -9,9 +9,27 @@ export default async function handler(req, res) {
   const { prompt } = req.body;
   const GEMINI_API_KEY = "AIzaSyArxSCLPtLwzuewFcLDhmcz0O-OgNHIXjg";
 
+  // First list available models to find the right name
   try {
+    const listRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1/models?key=${GEMINI_API_KEY}`
+    );
+    const listData = await listRes.json();
+    console.log("Available models:", JSON.stringify(listData?.models?.map(m => m.name)));
+
+    // Try generating with the first available model that supports generateContent
+    const availableModel = listData?.models?.find(m => 
+      m.supportedGenerationMethods?.includes("generateContent")
+    );
+
+    if (!availableModel) {
+      return res.status(500).json({ error: "No generateContent models found", models: listData });
+    }
+
+    console.log("Using model:", availableModel.name);
+
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1/${availableModel.name}:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -23,7 +41,7 @@ export default async function handler(req, res) {
     );
 
     const data = await response.json();
-    console.log("Gemini raw response:", JSON.stringify(data));
+    console.log("Gemini response:", JSON.stringify(data));
 
     if (data.error) {
       return res.status(500).json({ error: data.error.message });
