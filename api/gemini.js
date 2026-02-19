@@ -7,12 +7,9 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
   const { prompt } = req.body;
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-  // Debug: check if key is loaded
-  if (!GEMINI_API_KEY) {
-    return res.status(500).json({ error: "GEMINI_API_Key environment variable is missing" });
-  }
+  // Hardcode key temporarily to confirm it works
+  const GEMINI_API_KEY = "AIzaSyArxSCLPtLwzuewFcLDhmcz0O-OgNHIXjg";
 
   try {
     const response = await fetch(
@@ -28,25 +25,21 @@ export default async function handler(req, res) {
     );
 
     const data = await response.json();
+    console.log("Gemini raw response:", JSON.stringify(data));
 
-    // Debug: log full Gemini response
-    console.log("Gemini response:", JSON.stringify(data));
-
-    // Check for Gemini API errors
     if (data.error) {
-      return res.status(500).json({ error: `Gemini error: ${data.error.message}` });
+      return res.status(500).json({ error: data.error.message });
     }
 
     const answer = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-
     if (!answer) {
-      return res.status(500).json({ error: "Gemini returned empty response", raw: data });
+      return res.status(500).json({ error: "Empty response", raw: JSON.stringify(data) });
     }
 
     res.status(200).json({ answer });
 
   } catch (err) {
-    console.error("Fetch error:", err);
+    console.error("Error:", err.message);
     res.status(500).json({ error: err.message });
   }
 }
